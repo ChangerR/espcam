@@ -1,0 +1,33 @@
+menu "ESP Network Camera Configuration"
+
+    config ESPCAM_WIFI_AP_SSID
+        string "WiFi AP SSID for provisioning"
+        default "ESPCam_Setup"
+        help
+            WiFi SSID (network name) for the access point during provisioning.
+
+    config ESPCAM_WIFI_AP_PASSWORD
+        string "WiFi AP password for provisioning"
+        default "12345678"
+        help
+            WiFi password for the access point during provisioning.
+
+    config ESPCAM_MQTT_BROKER_URL
+        string "MQTT broker URL"
+        default "mqtt://your-broker.com"
+        help
+            URL of the MQTT broker to connect to.
+
+    config ESPCAM_DEVICE_SERIAL
+        string "Device serial number"
+        default "ESPCAM001"
+        help
+            Unique serial number for this camera device.
+
+    config ESPCAM_HEARTBEAT_INTERVAL
+        int "Heartbeat interval in seconds"
+        default 180
+        help
+            Interval between heartbeat messages in seconds.
+
+endmenu
