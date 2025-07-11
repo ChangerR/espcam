@@ -4,5 +4,12 @@ idf_component_register(SRCS "main.cpp"
                            "network_camera.cpp"
                            "mqtt_client.cpp"
                            "flash_storage.cpp"
+                           "task_manager.cpp"
+                           "h264_encoder.cpp"
+                           "ts_muxer.cpp"
+                           "video_recorder.cpp"
+                           "motion_detector.cpp"
+                           "cloud_uploader.cpp"
+                           "stream_pusher.cpp"
                     INCLUDE_DIRS "."
-                    REQUIRES esp_wifi nvs_flash esp_http_server esp_netif mqtt esp32-camera json)
+                    REQUIRES esp_wifi nvs_flash esp_http_server esp_netif mqtt esp32-camera json freertos esp_timer fatfs esp_http_client esp-tls)
