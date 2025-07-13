@@ -287,6 +287,12 @@ private:
     esp_err_t validateStreamConfig() const;
     esp_err_t createTasks();
     void deleteTasks();
+    
+    // Quality preset helpers
+    uint32_t getDefaultWidth(StreamQuality quality) const;
+    uint32_t getDefaultHeight(StreamQuality quality) const;
+    uint32_t getDefaultFPS(StreamQuality quality) const;
+    uint32_t getDefaultBitrate(StreamQuality quality) const;
 
     // Constants
     static const uint32_t STREAM_TASK_STACK_SIZE = 8192;

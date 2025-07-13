@@ -58,6 +58,11 @@ esp_err_t NetworkCamera::stop() {
         heartbeat_timer_ = nullptr;
     }
     
+    if (h264_encoder_) {
+        h264_encoder_->stop();
+        h264_encoder_->deinitialize();
+    }
+    
     if (camera_controller_) {
         camera_controller_->stopStreaming();
         camera_controller_->deinitialize();
@@ -115,6 +120,27 @@ esp_err_t NetworkCamera::initializeComponents() {
     ESP_ERROR_CHECK(camera_controller_->initialize(camera_config));
     camera_controller_->setStateCallback(
         std::bind(&NetworkCamera::onCameraStateChanged, this,
+                 std::placeholders::_1, std::placeholders::_2)
+    );
+    
+    // Initialize H.264 encoder
+    h264_encoder_ = std::make_unique<H264Encoder>();
+    H264Encoder::EncoderConfig encoder_config;
+    encoder_config.width = 640;  // Reduce resolution for initial testing
+    encoder_config.height = 480;
+    encoder_config.fps = 15;     // Reduce FPS for lower memory usage
+    encoder_config.bitrate = 1000000; // 1 Mbps
+    encoder_config.profile = H264Encoder::Profile::HIGH;
+    encoder_config.input_buffer_count = 1;  // Minimal buffer count for testing
+    encoder_config.output_buffer_count = 2; // Minimal buffer count
+    encoder_config.max_frame_size = 64 * 1024; // 64KB max frame for testing
+    
+    ESP_ERROR_CHECK(h264_encoder_->initialize(encoder_config));
+    h264_encoder_->setFrameCallback(
+        std::bind(&NetworkCamera::onH264Frame, this, std::placeholders::_1)
+    );
+    h264_encoder_->setStateCallback(
+        std::bind(&NetworkCamera::onH264StateChanged, this,
                  std::placeholders::_1, std::placeholders::_2)
     );
     
@@ -181,19 +207,44 @@ esp_err_t NetworkCamera::connectToMQTT() {
 }
 
 esp_err_t NetworkCamera::startCamera() {
-    ESP_LOGI(TAG, "Starting camera streaming");
+    ESP_LOGI(TAG, "Starting camera streaming and H.264 encoding");
     
-    return camera_controller_->startStreaming(
+    // Start H.264 encoder first
+    esp_err_t ret = h264_encoder_->start();
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to start H.264 encoder: %s", esp_err_to_name(ret));
+        return ret;
+    }
+    
+    // Start camera streaming
+    ret = camera_controller_->startStreaming(
         std::bind(&NetworkCamera::onCameraFrame, this, std::placeholders::_1)
     );
+    
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to start camera streaming: %s", esp_err_to_name(ret));
+        h264_encoder_->stop();
+        return ret;
+    }
+    
+    ESP_LOGI(TAG, "Camera and H.264 encoder started successfully");
+    return ESP_OK;
 }
 
 void NetworkCamera::onWiFiProvisioningStateChanged(WiFiProvisioning::ProvisioningState state, const std::string& message) {
     ESP_LOGI(TAG, "WiFi provisioning state: %d - %s", (int)state, message.c_str());
     
     switch (state) {
-        case WiFiProvisioning::ProvisioningState::CONNECTED:
+        case WiFiProvisioning::ProvisioningState::CREDENTIALS_RECEIVED:
+            ESP_LOGI(TAG, "WiFi credentials received, switching to STA mode");
+            // Stop the provisioning AP and HTTP server
             wifi_provisioning_->stopProvisioning();
+            // Start connecting to the configured WiFi
+            connectToWiFi();
+            break;
+            
+        case WiFiProvisioning::ProvisioningState::CONNECTED:
+            ESP_LOGI(TAG, "WiFi connected successfully");
             connectToMQTT();
             break;
             
@@ -220,7 +271,12 @@ void NetworkCamera::onMQTTStateChanged(MQTTClient::ConnectionState state, const 
         case MQTTClient::ConnectionState::DISCONNECTED:
         case MQTTClient::ConnectionState::ERROR:
             xTimerStop(heartbeat_timer_, 0);
-            camera_controller_->stopStreaming();
+            if (h264_encoder_) {
+                h264_encoder_->stop();
+            }
+            if (camera_controller_) {
+                camera_controller_->stopStreaming();
+            }
             if (current_state_ == SystemState::RUNNING) {
                 setState(SystemState::CONNECTING_MQTT);
                 // Attempt reconnection
@@ -249,29 +305,38 @@ void NetworkCamera::onMQTTMessage(const std::string& topic, const std::string& p
 }
 
 void NetworkCamera::onCameraFrame(camera_fb_t* frame) {
-    if (!frame || !mqtt_client_->isConnected()) {
+    if (!frame) {
         return;
     }
     
-    // For demonstration, we could publish frame info or send frame data
-    // In a real implementation, you might want to stream via HTTP or WebRTC
-    ESP_LOGD(TAG, "Frame captured: %zu bytes", frame->len);
+    ESP_LOGD(TAG, "Frame captured: %zu bytes, %dx%d, format: %d", 
+             frame->len, frame->width, frame->height, frame->format);
     
-    // Example: Publish frame info as JSON
-    cJSON* frame_info = cJSON_CreateObject();
-    cJSON_AddNumberToObject(frame_info, "timestamp", esp_log_timestamp());
-    cJSON_AddNumberToObject(frame_info, "size", frame->len);
-    cJSON_AddNumberToObject(frame_info, "width", frame->width);
-    cJSON_AddNumberToObject(frame_info, "height", frame->height);
-    cJSON_AddNumberToObject(frame_info, "format", frame->format);
-    
-    char* json_string = cJSON_Print(frame_info);
-    if (json_string) {
-        std::string status_topic = mqtt_client_->getStatusTopic();
-        mqtt_client_->publish(status_topic + "/frame", json_string, 0, false);
-        free(json_string);
+    // Send frame to H.264 encoder for hardware encoding
+    if (h264_encoder_ && h264_encoder_->isEncoding()) {
+        esp_err_t ret = h264_encoder_->encodeFrame(frame);
+        if (ret != ESP_OK) {
+            ESP_LOGW(TAG, "Failed to encode frame: %s", esp_err_to_name(ret));
+        }
     }
-    cJSON_Delete(frame_info);
+    
+    // Optionally publish frame metadata (not the actual frame data)
+    if (mqtt_client_->isConnected()) {
+        cJSON* frame_info = cJSON_CreateObject();
+        cJSON_AddNumberToObject(frame_info, "timestamp", esp_log_timestamp());
+        cJSON_AddNumberToObject(frame_info, "size", frame->len);
+        cJSON_AddNumberToObject(frame_info, "width", frame->width);
+        cJSON_AddNumberToObject(frame_info, "height", frame->height);
+        cJSON_AddNumberToObject(frame_info, "format", frame->format);
+        
+        char* json_string = cJSON_Print(frame_info);
+        if (json_string) {
+            std::string status_topic = mqtt_client_->getStatusTopic();
+            mqtt_client_->publish(status_topic + "/frame_info", json_string, 0, false);
+            free(json_string);
+        }
+        cJSON_Delete(frame_info);
+    }
 }
 
 void NetworkCamera::heartbeatTimerCallback(TimerHandle_t timer) {
@@ -336,6 +401,47 @@ void NetworkCamera::handleCommand(const std::string& topic, const std::string& p
     }
     
     cJSON_Delete(json);
+}
+
+void NetworkCamera::onH264Frame(const H264Encoder::FrameInfo& frame) {
+    ESP_LOGD(TAG, "H.264 frame encoded: %zu bytes, keyframe: %d, frame: %lu",
+             frame.size, frame.is_keyframe, (unsigned long)frame.frame_number);
+    
+    // Publish encoded H.264 frame via MQTT
+    if (mqtt_client_->isConnected()) {
+        std::string video_topic = mqtt_client_->getStatusTopic() + "/video";
+        
+        // For MQTT publishing, we might want to base64 encode the data or use binary publishing
+        // For now, just publish the frame statistics
+        cJSON* h264_info = cJSON_CreateObject();
+        cJSON_AddNumberToObject(h264_info, "timestamp", frame.timestamp_us);
+        cJSON_AddNumberToObject(h264_info, "size", frame.size);
+        cJSON_AddNumberToObject(h264_info, "frame_number", frame.frame_number);
+        cJSON_AddBoolToObject(h264_info, "keyframe", frame.is_keyframe);
+        
+        char* json_string = cJSON_Print(h264_info);
+        if (json_string) {
+            mqtt_client_->publish(video_topic, json_string, 0, false);
+            free(json_string);
+        }
+        cJSON_Delete(h264_info);
+        
+        // TODO: In a real implementation, you might:
+        // 1. Store H.264 frames in a ring buffer for HTTP streaming
+        // 2. Send frames via WebRTC for real-time streaming
+        // 3. Upload to cloud storage for recording
+        // 4. Stream via RTMP/RTSP protocols
+    }
+}
+
+void NetworkCamera::onH264StateChanged(H264Encoder::EncoderState state, const std::string& message) {
+    ESP_LOGI(TAG, "H.264 encoder state: %d - %s", (int)state, message.c_str());
+    
+    // Handle encoder state changes if needed
+    if (state == H264Encoder::EncoderState::ERROR) {
+        ESP_LOGE(TAG, "H.264 encoder error, attempting restart");
+        // Could implement error recovery here
+    }
 }
 
 void NetworkCamera::setState(SystemState state) {

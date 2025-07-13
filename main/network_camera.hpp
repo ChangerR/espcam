@@ -6,6 +6,7 @@
 #include "flash_storage.hpp"
 #include "mqtt_client.hpp"
 #include "camera_controller.hpp"
+#include "h264_encoder.hpp"
 #include "esp_err.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -19,6 +20,7 @@ public:
         CONNECTING_WIFI,
         CONNECTING_MQTT,
         RUNNING,
+        IDLE,
         ERROR
     };
 
@@ -37,6 +39,8 @@ private:
     void onCameraStateChanged(CameraController::CameraState state, const std::string& message);
     void onMQTTMessage(const std::string& topic, const std::string& payload);
     void onCameraFrame(camera_fb_t* frame);
+    void onH264Frame(const H264Encoder::FrameInfo& frame);
+    void onH264StateChanged(H264Encoder::EncoderState state, const std::string& message);
     
     static void heartbeatTimerCallback(TimerHandle_t timer);
     void sendHeartbeat();
@@ -54,6 +58,7 @@ private:
     std::unique_ptr<FlashStorage> flash_storage_;
     std::unique_ptr<MQTTClient> mqtt_client_;
     std::unique_ptr<CameraController> camera_controller_;
+    std::unique_ptr<H264Encoder> h264_encoder_;
     
     SystemState current_state_;
     std::string device_serial_;

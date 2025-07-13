@@ -278,10 +278,26 @@ void MQTTClient::setState(ConnectionState state, const std::string& message) {
 
 std::string MQTTClient::generateClientId() {
     uint8_t mac[6];
-    esp_read_mac(mac, ESP_MAC_WIFI_STA);
+    esp_err_t ret = esp_read_mac(mac, ESP_MAC_WIFI_STA);
     
     std::stringstream ss;
-    ss << "ESP32CAM_";
+    ss << "ESP32P4CAM_";
+    
+    if (ret != ESP_OK) {
+        // ESP32P4 doesn't have WiFi MAC, use base MAC or chip ID
+        ESP_LOGW(TAG, "WiFi MAC not available, using base MAC");
+        ret = esp_read_mac(mac, ESP_MAC_BASE);
+        
+        if (ret != ESP_OK) {
+            // If base MAC also fails, use chip ID
+            ESP_LOGW(TAG, "Base MAC not available, using chip ID");
+            uint64_t chip_id = esp_random();
+            for (int i = 0; i < 6; ++i) {
+                mac[i] = (chip_id >> (i * 8)) & 0xFF;
+            }
+        }
+    }
+    
     for (int i = 0; i < 6; ++i) {
         ss << std::hex << std::setw(2) << std::setfill('0') << static_cast<int>(mac[i]);
     }

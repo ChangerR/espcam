@@ -324,7 +324,7 @@ private:
     // Utility methods
     void setState(RecorderState state, const std::string& message = "");
     void updateStatistics(bool frame_processed);
-    uint64_t getCurrentTimestamp();
+    uint64_t getCurrentTimestamp() const;
     std::string formatDuration(uint64_t duration_ms) const;
     std::string formatFileSize(uint64_t size_bytes) const;
     void logError(const std::string& error);

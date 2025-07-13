@@ -5,12 +5,19 @@
 #include "esp_wifi.h"
 #include "esp_event.h"
 #include "esp_http_server.h"
+// Note: ESP32P4 doesn't support standard wifi_provisioning APIs with hosted WiFi
+// #include "wifi_provisioning/manager.h"
+// #include "wifi_provisioning/scheme_softap.h"
+#ifdef CONFIG_ESP_WIFI_REMOTE_LIBRARY_EPPP
+#include "esp_wifi_remote.h"
+#endif
 
 class WiFiProvisioning {
 public:
     enum class ProvisioningState {
         IDLE,
-        AP_STARTED,
+        STARTING,
+        PROVISIONING,
         CREDENTIALS_RECEIVED,
         CONNECTING,
         CONNECTED,
@@ -34,23 +41,22 @@ public:
     ProvisioningState getState() const { return current_state_; }
 
 private:
-    esp_err_t startSoftAP();
-    esp_err_t stopSoftAP();
-    esp_err_t startWebServer();
-    esp_err_t stopWebServer();
-    
-    static esp_err_t wifiConfigHandler(httpd_req_t *req);
-    static esp_err_t rootHandler(httpd_req_t *req);
     static void wifiEventHandler(void* arg, esp_event_base_t event_base, int32_t event_id, void* event_data);
+    static void provisioningEventHandler(void* arg, esp_event_base_t event_base, int32_t event_id, void* event_data);
+    
+    // HTTP server handlers
+    esp_err_t startHttpServer();
+    esp_err_t stopHttpServer();
+    static esp_err_t httpGetHandler(httpd_req_t *req);
+    static esp_err_t httpPostHandler(httpd_req_t *req);
     
     void setState(ProvisioningState state, const std::string& message = "");
-    esp_err_t connectToWiFi(const std::string& ssid, const std::string& password);
 
-    httpd_handle_t server_;
     ProvisioningState current_state_;
     ProvisioningCallback callback_;
-    std::string ap_ssid_;
-    std::string ap_password_;
+    std::string service_name_;
+    std::string service_key_;
+    httpd_handle_t http_server_;
     
     static WiFiProvisioning* instance_;
 };

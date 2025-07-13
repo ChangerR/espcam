@@ -204,7 +204,7 @@ private:
     void updateStatistics(const UploadRequest& request, bool success, uint64_t bytes_uploaded, uint64_t upload_time);
     
     // 实用工具
-    uint64_t getCurrentTimestamp();
+    uint64_t getCurrentTimestamp() const;
     std::string formatFileSize(uint64_t size_bytes) const;
     std::string formatDuration(uint64_t seconds) const;
     std::string generateRequestId() const;
@@ -236,6 +236,11 @@ private:
     // 统计信息
     Statistics statistics_;
     std::vector<std::string> upload_history_;
+    
+    // 回调函数
+    ProgressCallback progress_callback_;
+    StateCallback state_callback_;
+    CompletionCallback completion_callback_;
     
     // HTTP客户端状态
     struct HttpUploadState {

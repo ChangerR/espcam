@@ -10,6 +10,13 @@
 #include "freertos/queue.h"
 #include "freertos/semphr.h"
 
+// ESP32P4 Hardware H.264 encoder
+extern "C" {
+#include "esp_h264_enc_single_hw.h"
+#include "esp_h264_alloc.h"
+#include "esp_h264_types.h"
+}
+
 // ESP32P4 H.264 hardware encoder interface
 // Note: ESP32P4 has dedicated H.264 encoding hardware
 class H264Encoder {
@@ -123,6 +130,7 @@ private:
     
     // Internal methods
     esp_err_t initializeHardware();
+    esp_err_t initializeSoftwareSimulation();
     esp_err_t configureEncoder();
     esp_err_t startHardwareEncoder();
     esp_err_t stopHardwareEncoder();
@@ -131,6 +139,14 @@ private:
     static void encodingTask(void* parameter);
     esp_err_t processInputFrame(camera_fb_t* frame);
     esp_err_t processOutputFrame();
+    esp_err_t performHardwareEncoding(camera_fb_t* frame, size_t* output_size, bool* is_keyframe);
+    
+    // Format conversion
+    esp_err_t convertAndCopyFrame(camera_fb_t* frame);
+    esp_err_t convertRGB565ToOUYYEVYY(camera_fb_t* frame);
+    esp_err_t convertYUV422ToOUYYEVYY(camera_fb_t* frame);
+    esp_err_t convertRGB565ToYUV420(camera_fb_t* frame);  // Legacy function
+    esp_err_t convertYUV422ToYUV420(camera_fb_t* frame);  // Legacy function
     
     // Buffer management
     esp_err_t allocateBuffers();

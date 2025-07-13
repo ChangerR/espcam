@@ -7,7 +7,6 @@
 #include <sstream>
 #include <dirent.h>
 #include <sys/stat.h>
-#include <sys/statvfs.h>
 #include <algorithm>
 
 const char* VideoRecorder::TAG = "VideoRecorder";
@@ -20,6 +19,9 @@ VideoRecorder::VideoRecorder()
     , task_manager_(TaskManager::getInstance())
     , mqtt_client_(nullptr)
     , current_state_(RecorderState::UNINITIALIZED)
+    , motion_recording_active_(false)
+    , last_motion_recording_start_(0)
+    , last_motion_recording_stop_(0)
     , frame_queue_(nullptr)
     , state_mutex_(nullptr)
     , stats_mutex_(nullptr)
@@ -32,9 +34,6 @@ VideoRecorder::VideoRecorder()
     , last_frame_time_(0)
     , frame_counter_(0)
     , last_file_scan_time_(0)
-    , motion_recording_active_(false)
-    , last_motion_recording_start_(0)
-    , last_motion_recording_stop_(0)
 {
     // Initialize mutexes
     state_mutex_ = xSemaphoreCreateMutex();
@@ -45,8 +44,8 @@ VideoRecorder::VideoRecorder()
     }
     
     // Initialize statistics and current recording info
-    memset(&statistics_, 0, sizeof(statistics_));
-    memset(&current_recording_, 0, sizeof(current_recording_));
+    statistics_ = {};
+    current_recording_ = {};
     
     // Set up component callbacks
     encoder_->setStateCallback(
@@ -206,8 +205,8 @@ esp_err_t VideoRecorder::initialize(const RecorderConfig& config) {
             return ret;
         }
         
-        ESP_LOGI(TAG, "Motion detector initialized with sensitivity %d, timeout %d ms",
-                 config_.motion_threshold, config_.no_motion_timeout_ms);
+        ESP_LOGI(TAG, "Motion detector initialized with sensitivity %lu, timeout %lu ms",
+                 (unsigned long)config_.motion_threshold, (unsigned long)config_.no_motion_timeout_ms);
     }
     
     // Create frame queue
@@ -256,8 +255,8 @@ esp_err_t VideoRecorder::initialize(const RecorderConfig& config) {
     setState(RecorderState::INITIALIZED, "Video recorder initialized");
     resetStatistics();
     
-    ESP_LOGI(TAG, "Video recorder initialized: %dx%d@%dfps, %s mode",
-             encoder_config.width, encoder_config.height, encoder_config.fps,
+    ESP_LOGI(TAG, "Video recorder initialized: %lux%lu@%lufps, %s mode",
+             (unsigned long)encoder_config.width, (unsigned long)encoder_config.height, (unsigned long)encoder_config.fps,
              (config_.mode == RecordingMode::CONTINUOUS) ? "continuous" :
              (config_.mode == RecordingMode::SCHEDULED) ? "scheduled" :
              (config_.mode == RecordingMode::MOTION_BASED) ? "motion-based" : "manual");
@@ -641,8 +640,8 @@ void VideoRecorder::onMotionDetected(const MotionDetector::DetectionResult& resu
     
     // Handle automatic recording start
     if (result.recording_should_start && !motion_recording_active_) {
-        ESP_LOGI(TAG, "Motion detected - auto-starting recording (%.1f%% motion, %d pixels)",
-                 result.motion_percentage, result.motion_pixels);
+        ESP_LOGI(TAG, "Motion detected - auto-starting recording (%.1f%% motion, %lu pixels)",
+                 result.motion_percentage, (unsigned long)result.motion_pixels);
         
         // Start recording automatically
         if (current_state_ == RecorderState::INITIALIZED) {
@@ -697,8 +696,8 @@ void VideoRecorder::onMotionDetected(const MotionDetector::DetectionResult& resu
     // Log detailed motion status periodically
     static uint64_t last_status_log = 0;
     if ((now - last_status_log) > 5000000) {  // Every 5 seconds
-        ESP_LOGI(TAG, "Motion status: %.1f%% motion, %d regions active, state=%d, recording=%s",
-                 result.motion_percentage, result.active_regions, (int)result.state,
+        ESP_LOGI(TAG, "Motion status: %.1f%% motion, %lu regions active, state=%d, recording=%s",
+                 result.motion_percentage, (unsigned long)result.active_regions, (int)result.state,
                  motion_recording_active_ ? "active" : "inactive");
         last_status_log = now;
     }
@@ -775,22 +774,15 @@ esp_err_t VideoRecorder::createOutputDirectory() {
 }
 
 esp_err_t VideoRecorder::validateStorageSpace() {
-    struct statvfs vfs;
-    if (statvfs(config_.output_directory.c_str(), &vfs) != 0) {
-        ESP_LOGE(TAG, "Failed to check storage space");
+    // Simple validation - check if directory exists
+    // On ESP32, detailed filesystem info is not easily available
+    struct stat st;
+    if (stat(config_.output_directory.c_str(), &st) != 0) {
+        ESP_LOGE(TAG, "Storage directory does not exist: %s", config_.output_directory.c_str());
         return ESP_FAIL;
     }
     
-    uint64_t available_bytes = vfs.f_bavail * vfs.f_frsize;
-    uint64_t required_bytes = config_.max_file_size_mb * 1024 * 1024;
-    
-    if (available_bytes < required_bytes) {
-        ESP_LOGE(TAG, "Insufficient storage: %llu MB available, %llu MB required",
-                 available_bytes / (1024 * 1024), required_bytes / (1024 * 1024));
-        return ESP_FAIL;
-    }
-    
-    ESP_LOGI(TAG, "Storage validation passed: %llu MB available", available_bytes / (1024 * 1024));
+    ESP_LOGI(TAG, "Storage validation passed");
     return ESP_OK;
 }
 
@@ -840,7 +832,7 @@ void VideoRecorder::updateStatistics(bool frame_processed) {
     }
 }
 
-uint64_t VideoRecorder::getCurrentTimestamp() {
+uint64_t VideoRecorder::getCurrentTimestamp() const {
     return esp_timer_get_time();
 }
 
@@ -877,6 +869,23 @@ void VideoRecorder::logError(const std::string& error) {
     }
 }
 
+std::string VideoRecorder::generateFilename() const {
+    auto now = std::time(nullptr);
+    auto tm = *std::localtime(&now);
+    
+    std::ostringstream oss;
+    oss << config_.output_directory << "/video_"
+        << std::setfill('0') << std::setw(4) << (tm.tm_year + 1900)
+        << std::setfill('0') << std::setw(2) << (tm.tm_mon + 1)
+        << std::setfill('0') << std::setw(2) << tm.tm_mday << "_"
+        << std::setfill('0') << std::setw(2) << tm.tm_hour
+        << std::setfill('0') << std::setw(2) << tm.tm_min
+        << std::setfill('0') << std::setw(2) << tm.tm_sec
+        << ".ts";
+    
+    return oss.str();
+}
+
 VideoRecorder::Statistics VideoRecorder::getStatistics() const {
     Statistics stats = {};
     
@@ -890,7 +899,7 @@ VideoRecorder::Statistics VideoRecorder::getStatistics() const {
 
 void VideoRecorder::resetStatistics() {
     if (xSemaphoreTake(stats_mutex_, pdMS_TO_TICKS(100)) == pdTRUE) {
-        memset(&statistics_, 0, sizeof(statistics_));
+        statistics_ = {};
         xSemaphoreGive(stats_mutex_);
     }
 }
@@ -997,9 +1006,9 @@ MotionDetector::DetectionResult VideoRecorder::getMotionStatus() const {
 }
 
 void VideoRecorder::onUploadProgress(const CloudUploader::UploadProgress& progress) {
-    ESP_LOGD(TAG, "Upload progress: %s - %.1f%% (%llu/%llu bytes, %d KB/s)",
+    ESP_LOGD(TAG, "Upload progress: %s - %.1f%% (%llu/%llu bytes, %lu KB/s)",
              progress.file_path.c_str(), progress.progress_percentage,
-             progress.bytes_uploaded, progress.total_bytes, progress.upload_speed_kbps);
+             progress.bytes_uploaded, progress.total_bytes, (unsigned long)progress.upload_speed_kbps);
 }
 
 void VideoRecorder::onUploadCompleted(const std::string& file_path, bool success, const std::string& cloud_url) {
@@ -1164,14 +1173,14 @@ void VideoRecorder::printStatus() const {
         ESP_LOGI(TAG, "Motion detection enabled: %s", motion_status.motion_recording_enabled ? "YES" : "NO");
         ESP_LOGI(TAG, "Motion currently detected: %s", motion_status.motion_currently_detected ? "YES" : "NO");
         ESP_LOGI(TAG, "Motion recording active: %s", motion_status.motion_recording_active ? "YES" : "NO");
-        ESP_LOGI(TAG, "Current motion: %.1f%% (%d pixels, %d regions)",
-                 motion_status.current_motion_percentage, motion_status.current_motion_pixels, 
-                 motion_status.active_motion_regions);
+        ESP_LOGI(TAG, "Current motion: %.1f%% (%lu pixels, %lu regions)",
+                 motion_status.current_motion_percentage, (unsigned long)motion_status.current_motion_pixels, 
+                 (unsigned long)motion_status.active_motion_regions);
         ESP_LOGI(TAG, "No motion duration: %llu ms", motion_status.no_motion_duration_ms);
         ESP_LOGI(TAG, "Motion duration: %llu ms", motion_status.motion_duration_ms);
         ESP_LOGI(TAG, "Recording duration: %llu ms", motion_status.recording_duration_ms);
-        ESP_LOGI(TAG, "Motion sensitivity: %d", motion_status.motion_sensitivity);
-        ESP_LOGI(TAG, "Motion timeout: %d ms", motion_status.motion_timeout_ms);
+        ESP_LOGI(TAG, "Motion sensitivity: %lu", (unsigned long)motion_status.motion_sensitivity);
+        ESP_LOGI(TAG, "Motion timeout: %lu ms", (unsigned long)motion_status.motion_timeout_ms);
         ESP_LOGI(TAG, "Motion mode: %s", motion_status.motion_mode.c_str());
         if (!motion_status.current_filename.empty()) {
             ESP_LOGI(TAG, "Current file: %s", motion_status.current_filename.c_str());

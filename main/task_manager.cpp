@@ -188,12 +188,12 @@ void TaskManager::printTaskStatus() const {
     auto tasks = getAllTasks();
     for (const auto& task_pair : tasks) {
         const TaskInfo& info = task_pair.second;
-        ESP_LOGI(TAG, "Task: %s | State: %d | Priority: %d | Stack: %d | Watermark: %d",
+        ESP_LOGI(TAG, "Task: %s | State: %d | Priority: %lu | Stack: %lu | Watermark: %lu",
                  info.name.c_str(),
                  (int)info.state,
-                 info.priority,
-                 info.stack_size,
-                 getStackWatermark(info.name));
+                 (unsigned long)info.priority,
+                 (unsigned long)info.stack_size,
+                 (unsigned long)getStackWatermark(info.name));
     }
     
     ESP_LOGI(TAG, "=========================");
@@ -201,8 +201,8 @@ void TaskManager::printTaskStatus() const {
 
 void TaskManager::printMemoryUsage() const {
     ESP_LOGI(TAG, "=== Memory Usage Report ===");
-    ESP_LOGI(TAG, "Free heap: %d bytes", esp_get_free_heap_size());
-    ESP_LOGI(TAG, "Minimum free heap: %d bytes", esp_get_minimum_free_heap_size());
+    ESP_LOGI(TAG, "Free heap: %lu bytes", (unsigned long)esp_get_free_heap_size());
+    ESP_LOGI(TAG, "Minimum free heap: %lu bytes", (unsigned long)esp_get_minimum_free_heap_size());
     ESP_LOGI(TAG, "===========================");
 }
 
@@ -223,14 +223,14 @@ void TaskManager::checkStackWatermarks() const {
             uint32_t watermark = uxTaskGetStackHighWaterMark(info.handle);
             uint32_t usage_percent = ((info.stack_size - watermark) * 100) / info.stack_size;
             
-            ESP_LOGI(TAG, "Task '%s': %d/%d bytes used (%d%%)",
+            ESP_LOGI(TAG, "Task '%s': %lu/%lu bytes used (%lu%%)",
                      info.name.c_str(),
-                     info.stack_size - watermark,
-                     info.stack_size,
-                     usage_percent);
+                     (unsigned long)(info.stack_size - watermark),
+                     (unsigned long)info.stack_size,
+                     (unsigned long)usage_percent);
             
             if (usage_percent > 80) {
-                ESP_LOGW(TAG, "Task '%s' stack usage is high: %d%%", info.name.c_str(), usage_percent);
+                ESP_LOGW(TAG, "Task '%s' stack usage is high: %lu%%", info.name.c_str(), (unsigned long)usage_percent);
             }
         }
     }

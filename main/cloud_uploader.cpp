@@ -32,8 +32,8 @@ CloudUploader::CloudUploader()
     }
     
     // 初始化统计信息
-    memset(&statistics_, 0, sizeof(statistics_));
-    memset(&current_progress_, 0, sizeof(current_progress_));
+    statistics_ = {};
+    current_progress_ = {};
     
     ESP_LOGI(TAG, "CloudUploader created");
 }
@@ -96,8 +96,8 @@ esp_err_t CloudUploader::initialize(const UploadConfig& config, MQTTClient* mqtt
     
     setState(UploadState::IDLE, "Cloud uploader initialized");
     
-    ESP_LOGI(TAG, "Cloud uploader initialized: queue_size=%d, max_concurrent=%d, timeout=%d sec",
-             config_.upload_queue_size, config_.max_concurrent_uploads, config_.upload_timeout_sec);
+    ESP_LOGI(TAG, "Cloud uploader initialized: queue_size=%lu, max_concurrent=%lu, timeout=%lu sec",
+             (unsigned long)config_.upload_queue_size, (unsigned long)config_.max_concurrent_uploads, (unsigned long)config_.upload_timeout_sec);
     
     return ESP_OK;
 }
@@ -453,7 +453,8 @@ esp_err_t CloudUploader::performHttpUpload(const std::string& file_path, const C
             }
             
             if (ret == ESP_OK) {
-                int content_length = esp_http_client_fetch_headers(client);
+                // int content_length = esp_http_client_fetch_headers(client);
+                esp_http_client_fetch_headers(client);
                 int status_code = esp_http_client_get_status_code(client);
                 
                 if (status_code >= 200 && status_code < 300) {
@@ -574,8 +575,8 @@ void CloudUploader::uploadTask(void* parameter) {
             if (ret != ESP_OK && request.retry_count < self->config_.retry_max_attempts) {
                 // 重试
                 request.retry_count++;
-                ESP_LOGW(TAG, "Upload failed, retrying (%d/%d): %s", 
-                         request.retry_count, self->config_.retry_max_attempts, request.local_file_path.c_str());
+                ESP_LOGW(TAG, "Upload failed, retrying (%lu/%lu): %s", 
+                         (unsigned long)request.retry_count, (unsigned long)self->config_.retry_max_attempts, request.local_file_path.c_str());
                 vTaskDelay(pdMS_TO_TICKS(self->config_.retry_delay_sec * 1000));
                 xQueueSendToBack(self->upload_queue_handle_, &request, 0);
             } else if (ret != ESP_OK) {
@@ -821,7 +822,7 @@ void CloudUploader::updateStatistics(const UploadRequest& request, bool success,
     }
 }
 
-uint64_t CloudUploader::getCurrentTimestamp() {
+uint64_t CloudUploader::getCurrentTimestamp() const {
     return esp_timer_get_time();
 }
 
@@ -860,8 +861,8 @@ void CloudUploader::printStatus() const {
     ESP_LOGI(TAG, "Failed uploads: %llu", stats.failed_uploads);
     ESP_LOGI(TAG, "Total bytes uploaded: %llu", stats.total_bytes_uploaded);
     ESP_LOGI(TAG, "Average speed: %.2f KB/s", stats.avg_upload_speed_kbps);
-    ESP_LOGI(TAG, "Queue size: %d", stats.queue_size);
-    ESP_LOGI(TAG, "Active uploads: %d", stats.active_uploads);
+    ESP_LOGI(TAG, "Queue size: %lu", (unsigned long)stats.queue_size);
+    ESP_LOGI(TAG, "Active uploads: %lu", (unsigned long)stats.active_uploads);
     
     if (!current_upload_file_.empty()) {
         ESP_LOGI(TAG, "Current upload: %s (%.1f%%)", 

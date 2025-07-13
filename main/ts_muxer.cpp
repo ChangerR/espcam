@@ -39,7 +39,7 @@ TSMuxer::TSMuxer()
     }
     
     // Initialize statistics
-    memset(&statistics_, 0, sizeof(statistics_));
+    statistics_ = {};
 }
 
 TSMuxer::~TSMuxer() {
@@ -72,7 +72,7 @@ esp_err_t TSMuxer::initialize(const TSConfig& config) {
     
     // Validate configuration
     if (config_.packet_size != 188) {
-        ESP_LOGE(TAG, "Invalid TS packet size: %d (must be 188)", config_.packet_size);
+        ESP_LOGE(TAG, "Invalid TS packet size: %lu (must be 188)", (unsigned long)config_.packet_size);
         xSemaphoreGive(state_mutex_);
         return ESP_ERR_INVALID_ARG;
     }
@@ -793,7 +793,7 @@ TSMuxer::Statistics TSMuxer::getStatistics() const {
 
 void TSMuxer::resetStatistics() {
     if (xSemaphoreTake(stats_mutex_, pdMS_TO_TICKS(100)) == pdTRUE) {
-        memset(&statistics_, 0, sizeof(statistics_));
+        statistics_ = {};
         xSemaphoreGive(stats_mutex_);
     }
 }

@@ -15,3 +15,7 @@ dependencies:
   #   # All dependencies of `main` are public by default.
   #   public: true
   espressif/esp32-camera: '*'
+  espressif/esp_wifi_remote: '*'
+  espressif/esp_hosted: '*'
+  espressif/esp_codec_dev: '*'
+  espressif/esp_h264: '*'

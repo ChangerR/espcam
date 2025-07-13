@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <inttypes.h>
 
 const char* MotionDetector::TAG = "MotionDetector";
 
@@ -32,8 +33,8 @@ MotionDetector::MotionDetector()
         ESP_LOGE(TAG, "Failed to create statistics mutex");
     }
     
-    memset(&statistics_, 0, sizeof(statistics_));
-    memset(&last_result_, 0, sizeof(last_result_));
+    statistics_ = {};
+    last_result_ = {};
 }
 
 MotionDetector::~MotionDetector() {
@@ -68,7 +69,7 @@ esp_err_t MotionDetector::initialize(const DetectionConfig& config) {
     recent_motion_levels_.clear();
     recent_motion_levels_.reserve(100);  // Store last 100 motion level samples
     
-    ESP_LOGI(TAG, "Motion detector initialized: mode=%d, sensitivity=%.1f, timeout=%d ms",
+    ESP_LOGI(TAG, "Motion detector initialized: mode=%d, sensitivity=%.1f, timeout=%" PRIu32 " ms",
              (int)config_.mode, current_sensitivity_, config_.no_motion_timeout_ms);
     
     return ESP_OK;
@@ -148,7 +149,7 @@ esp_err_t MotionDetector::processFrame(camera_fb_t* frame) {
             region_motion_levels_.resize(region_count, 0.0f);
         }
         
-        ESP_LOGI(TAG, "Frame dimensions: %dx%d, processed: %dx%d",
+        ESP_LOGI(TAG, "Frame dimensions: %" PRIu32 "x%" PRIu32 ", processed: %" PRIu32 "x%" PRIu32 "",
                  frame_width_, frame_height_, processed_width_, processed_height_);
     }
     
@@ -214,7 +215,7 @@ esp_err_t MotionDetector::processFrame(camera_fb_t* frame) {
         motion_callback_(last_result_);
     }
     
-    ESP_LOGD(TAG, "Motion detection: %.1f%% motion, %d pixels, state=%d",
+    ESP_LOGD(TAG, "Motion detection: %.1f%% motion, %" PRIu32 " pixels, state=%d",
              last_result_.motion_percentage, last_result_.motion_pixels, (int)last_result_.state);
     
     return ESP_OK;
@@ -734,7 +735,7 @@ MotionDetector::Statistics MotionDetector::getStatistics() const {
 
 void MotionDetector::resetStatistics() {
     if (xSemaphoreTake(stats_mutex_, pdMS_TO_TICKS(100)) == pdTRUE) {
-        memset(&statistics_, 0, sizeof(statistics_));
+        statistics_ = {};
         statistics_.current_sensitivity = current_sensitivity_;
         xSemaphoreGive(stats_mutex_);
     }
@@ -748,23 +749,23 @@ esp_err_t MotionDetector::setSensitivity(uint32_t sensitivity) {
     config_.sensitivity = sensitivity;
     current_sensitivity_ = sensitivity;
     
-    ESP_LOGI(TAG, "Sensitivity updated to: %d", sensitivity);
+    ESP_LOGI(TAG, "Sensitivity updated to: %" PRIu32 "", sensitivity);
     return ESP_OK;
 }
 
 esp_err_t MotionDetector::setMotionTimeout(uint32_t timeout_ms) {
     config_.no_motion_timeout_ms = timeout_ms;
-    ESP_LOGI(TAG, "Motion timeout updated to: %d ms", timeout_ms);
+    ESP_LOGI(TAG, "Motion timeout updated to: %" PRIu32 " ms", timeout_ms);
     return ESP_OK;
 }
 
 void MotionDetector::printDetectionStatus() const {
     ESP_LOGI(TAG, "=== Motion Detection Status ===");
     ESP_LOGI(TAG, "State: %d", (int)current_state_);
-    ESP_LOGI(TAG, "Motion: %.1f%% (%d pixels)", 
+    ESP_LOGI(TAG, "Motion: %.1f%% (%" PRIu32 " pixels)", 
              last_result_.motion_percentage, last_result_.motion_pixels);
-    ESP_LOGI(TAG, "Active regions: %d/%d", 
-             last_result_.active_regions, config_.detection_regions_x * config_.detection_regions_y);
+    ESP_LOGI(TAG, "Active regions: %" PRIu32 "/%" PRIu32 "", 
+             last_result_.active_regions, (config_.detection_regions_x * config_.detection_regions_y));
     ESP_LOGI(TAG, "Current sensitivity: %.1f", current_sensitivity_);
     ESP_LOGI(TAG, "No motion duration: %llu ms", last_result_.no_motion_duration_ms);
     ESP_LOGI(TAG, "Motion duration: %llu ms", last_result_.motion_duration_ms);
